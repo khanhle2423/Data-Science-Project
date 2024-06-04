@@ -1,0 +1,456 @@
+---
+title: "Laliga dataset"
+author: "Le Cong Khanh 21110320"
+date: "2024-05-31"
+output: html_document
+---
+## [Import The Dataset]()
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = normalizePath("E:/test")) 
+R.version
+```
+
+```{r}
+pacman::p_load(
+  ggplot2,
+  mvtnorm,
+  GGally,
+  corrplot,
+  readxl,
+  tidyverse,
+  gridExtra,
+  grid,
+  plotly,
+  ggcorrplot,
+  FactoMineR,
+  factoextra
+)
+```
+
+```{r}
+data = read_excel("la_liga.xlsx")
+```
+
+## [Data and Methods]():
+### **Information About The Dataset**
+- ```Team```: Name of the football team.  
+- ```Points```: Number of points earned in the season.  
+- ```Matches```: Total number of matches played in the season.  
+- ```Wins```: Number of matches won.  
+- ```Draws```: Number of matches drawn.  
+- ```Loses```: Number of matches lost.  
+- ```Goals.scored```: Number of goals scored.  
+- ```Goals.conceded```: Number of goals conceded.  
+- ```Difference.goals```: Goal difference (goals scored minus goals conceded).  
+- ```Percentage.scored.goals```: Average number of goals scored per match.  
+- ```Percentage.conceded.goals```: Average number of goals conceded per match.   
+- ```Shots```: Total number of shots.  
+- ```Shots.on.goal```: Number of shots on target.  
+- ```Penalties.scored```: Number of goals scored from penalties.  
+- ```Assistances```: Number of assists.  
+- ```Fouls.made```: Number of fouls committed.  
+- ```Matches.without.conceding```: Number of matches with a clean sheet (no goals conceded).   
+- ```Yellow.cards```: Number of yellow cards received.   
+- ```Red.cards```: Number of red cards received.    
+- ```Offsides```: Number of offsides.  
+
+### **Remark on the dataset**:  
+The dataset contains 20 rows and 20 columns which no duplicate or missing values. All columns are positive number.
+
+### **Methods**:  
+To identify the indicators that influence football performance, we perform a comparative analysis between teams of varying success levels. Often, we encounter datasets with many related categories; hence, applying techniques to reduce the quantity of data can be beneficial. In this study, we aim to reduce the dimensions of a data matrix without losing relevant information by using Principal Component Analysis (PCA). Subsequently, we utilize these principal components to identify the performance differences between the top and bottom teams in LaLiga.  
+```{r}
+head(data)
+str(data)
+```
+## [Exploratory Data Analysis]()
+### [1. Data Overview]()
+We will add some features to the original dataset to facilitate data exploration, simultaneously, deviding the teams into two group. 
+
+```{r}
+data <- data %>%
+  mutate(
+         Effectiveness.Percentage  = round(((Goals.scored + Shots.on.goal) / Shots) * 100, digits=2),
+         Rank = row_number(),
+         Team.Level = case_when(
+            Rank <= 6 ~ "Top",
+            Rank > 6 & Rank < 14 ~ "Middle",
+            TRUE ~ "Bottom")
+        )
+data = data[, -c(22)]
+str(data)
+data
+```
+
+- Plot the distribution of numerical columns
+
+```{r, fig.width=20, fig.height=20}
+plot_all_densities <- function(data, exclude_cols = c(1,3,22) , fill_color = "skyblue", alpha_value = 0.3, base_size = 15) {
+  plot_list <- list()
+  for (var in names(data[, -exclude_cols])) {
+    p = ggplot(data, aes_string(x = var)) +
+      geom_density(fill = "skyblue", color = "blue", alpha = alpha_value) +  
+      theme_minimal(base_size = base_size) + 
+      labs(title = var,
+           x = "",
+           y = "Density",
+           ) +
+      geom_rug(sides = "b")
+     plot_list[[var]] <- p
+  }
+  title_grob <- textGrob("Distribution Of Numerical Columns", gp = gpar(fontsize = 20, fontface = "bold"))
+  grid.arrange(title_grob, grobs=plot_list, ncol = 5, nrow = 5)
+}
+
+plot_all_densities(data)
+```
+
+
+
+```{r, fig.width=20, fig.height=20}
+plot_all_boxplot <- function(data, exclude_cols = c(1, 3, 22), fill_color = "skyblue", alpha_value = 0.3, base_size = 15) {
+  plot_list <- list()
+  for (var in names(data[, -exclude_cols])) {
+    p = ggplot(data, aes_string(x = var)) +
+      geom_boxplot(fill='palegreen3') +  
+      theme_minimal(base_size = base_size) + 
+      labs(title = var,
+           x = "",
+           y = "Value"
+           ) 
+    plot_list[[var]] <- p
+  }
+  grid.arrange(title_grob,
+               grobs=plot_list,
+               ncol = 5,
+               nrow = 5)
+}
+
+plot_all_boxplot(data)
+
+
+```
+
+These plots provide an overview of the distribution of football statistics in La Liga, showing a fairly even competition between teams, with some teams standing out. Points, wins, losses, and goals scored are all clustered around the median, with some teams like Barcelona, Real Madrid, or Atlético Madrid potentially having significantly higher metrics. Draws and fouls made are also tightly distributed, with a few teams tending to draw more or commit more fouls. Goal difference and win ratio percentage highlight a clear distinction between stronger and weaker teams, with some teams having notably high goal differences and win ratios. Goals conceded, offsides, yellow cards, and red cards also show a relatively tight distribution, reflecting the disciplined and strategic play of the teams. Metrics such as shots, shots on goal, and assists are evenly distributed, with some teams having notably more effective offenses. Overall, we illustrate the balance and intense competition in La Liga, with a few teams excelling in many key statistics.
+
+### [2.**Comparison between the team levels**]()
+
+```{r}
+top_teams <- data %>% filter(Team.Level == 'Top')
+middle_teams <- data %>% filter(Team.Level == 'Middle')
+bottom_teams <- data %>% filter(Team.Level == 'Bottom')
+summary(top_teams)
+cat('\n \n')
+summary(middle_teams)
+cat('\n \n')
+summary(bottom_teams)
+```
+### [2.1. Attack and defense statistics]()
+
+- [2.1.1. Average asisstances by team level]()
+
+
+```{r, fig.width=15, fig.height=5}
+avg_assists_top <- round(mean(top_teams$Assistances), digits = 2)
+avg_assists_middle <- round(mean(middle_teams$Assistances), digits = 2)
+avg_assists_bottom <- round(mean(bottom_teams$Assistances), digits = 2)
+
+avg_assists <- data.frame(
+  Team_Level = c("Top Teams", "Middle Teams", "Bottom Teams"),
+  Avg_Assists = c(avg_assists_top, avg_assists_middle, avg_assists_bottom)
+)
+ggplot(avg_assists, aes(x = Team_Level, y = Avg_Assists, fill = Team_Level)) +
+      geom_bar(stat = "identity", width = 0.5, color = "black") +
+      geom_text(aes(label = Avg_Assists), vjust = -0.5, color = "black", size = 4) +
+      labs(title = "Average Assists by Team Level",
+           x = "Team Level",
+           y = "Average Assists",
+           fill = "Team Level") +
+      theme_minimal() +
+      theme(legend.position = "none") +
+      scale_fill_manual(values = c("Top Teams" = "skyblue", "Middle Teams" = "lightgreen", "Bottom Teams" = "salmon"))
+```
+
+- [2.1.2. Comparison of Shots, Shots on Goal, and Goals Scored by Team Level.]()
+
+```{r, fig.width=15, fig.height=5}
+long_data <- data %>%
+  gather(key = "Metric", value = "Value", Shots, Shots.on.goal, Goals.scored)
+avg_metrics <- long_data %>%
+  group_by(Team.Level, Metric) %>%
+  summarise(Average = mean(Value))
+avg_metrics
+ggplot(avg_metrics, aes(x = Team.Level, y = Average, fill = Metric)) +
+  geom_bar(stat = "identity", position = position_dodge(), color = "black") +
+  geom_text(aes(label = round(Average, 2)), position = position_dodge(0.9), vjust = -0.5, size = 3) +
+  labs(title = "Comparison of Shots, Shots on Goal, and Goals Scored by Team Level",
+       x = "Team Level",
+       y = "Average Value",
+       fill = "Metric") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Shots" = "skyblue", "Shots.on.goal" = "lightgreen", "Goals.scored" = "salmon"))
+```
+
+-  [2.1.3. Do bottom teams tend to have less effective shots than top teams ?]()
+
+```{r, fig.width=15, fig.height=5}
+avg_top <- round(mean(top_teams$Effectiveness.Percentage), digits=2)
+avg_bottom <- round(mean(bottom_teams$Effectiveness.Percentage), digits=2)
+avg_middle <- round(mean(middle_teams$Effectiveness.Percentage), digits=2)
+
+avg_effectiveness <- data.frame(
+  Team_Level = c("Top Teams", "Middle Teams" ,"Bottom Teams"),
+  Avg_effectiveness = c(avg_top, avg_middle, avg_bottom)
+)
+
+ggplot(avg_effectiveness, aes(x = Team_Level, y = Avg_effectiveness, fill = Team_Level)) +
+  geom_bar(stat = "identity", width = 0.5, color = "black") +
+  geom_text(aes(label = paste0(Avg_effectiveness, "%")), vjust = -0.5, color = "black", size = 4) +
+  labs(title = "Average Effectiveness Percentage by Team Level",
+       x = "Team Level",
+       y = "Average Effectiveness (%)",
+       fill = "Team Level") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c("Top Teams" = "skyblue", "Middle Teams" = "lightgreen", "Bottom Teams" = "salmon"))
+```
+
+
+
+
+### [2.2. Analysis of penalty cards.]()
+
+```{r, fig.width=15, fig.height=5}
+avg_yellow_cards_top <- round(mean(top_teams$Yellow.cards / top_teams$Matches), digits = 2)
+avg_yellow_cards_middle <- round(mean(middle_teams$Yellow.cards / middle_teams$Matches), digits = 2)
+avg_yellow_cards_bottom <- round(mean(bottom_teams$Yellow.cards / bottom_teams$Matches), digits = 2)
+
+avg_red_cards_top <- round(mean(top_teams$Red.cards / top_teams$Matches), digits = 2)
+avg_red_cards_middle <- round(mean(middle_teams$Red.cards / middle_teams$Matches), digits = 2)
+avg_red_cards_bottom <- round(mean(bottom_teams$Red.cards / bottom_teams$Matches), digits = 2)
+
+avg_cards <- data.frame(
+  Team_Level = rep(c("Top Teams", "Middle Teams", "Bottom Teams"), each = 2),
+  Card_Type = rep(c("Yellow Cards", "Red Cards"), times = 3),
+  Avg_Cards = c(avg_yellow_cards_top, avg_red_cards_top,
+                avg_yellow_cards_middle, avg_red_cards_middle,
+                avg_yellow_cards_bottom, avg_red_cards_bottom)
+)
+
+ggplot(avg_cards, aes(x = Team_Level, y = Avg_Cards, fill = Card_Type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black") +
+  geom_text(aes(label = Avg_Cards), position = position_dodge(width = 0.7), vjust = -0.5, size = 4) +
+  labs(title = "Average Yellow and Red Cards per Match by Team Level",
+       x = "Team Level",
+       y = "Average Cards per Match",
+       fill = "Card Type") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Yellow Cards" = "yellow", "Red Cards" = "red"))
+```
+
+
+### [2.3. Analysis of tactical indicators:]()
+- [2.3.1. Do lower ranked teams commit more fouls than higher ranked teams?]()
+
+```{r, fig.width=15, fig.height=5}
+total_fouls_top <- sum(top_teams$Fouls.made)
+total_fouls_bottom <- sum(bottom_teams$Fouls.made)
+total_fouls_middle <- sum(middle_teams$Fouls.made)
+
+# Create a data frame for total fouls
+total_fouls <- data.frame(
+  Team_Level = c("Top Teams", "Middle Teams" ,"Bottom Teams"),
+  Total_Fouls = c(total_fouls_top, total_fouls_middle ,total_fouls_bottom)
+)
+
+# Plot the bar chart
+ggplot(total_fouls, aes(x = Team_Level, y = Total_Fouls, fill = Team_Level)) +
+  geom_bar(stat = "identity", width = 0.5, color = "black") +
+  geom_text(aes(label = Total_Fouls), vjust = -0.5, color = "black", size = 4) +
+  labs(title = "Total Fouls Committed by Team Level",
+       x = "Team Level",
+       y = "Total Fouls",
+       fill = "Team Level") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c("Top Teams" = "skyblue", "Middle Teams" = "lightgreen", "Bottom Teams" = "salmon"))
+```
+
+
+
+- [2.3.3. Average number of offsides committed that season]()
+
+```{r, fig.width=15, fig.height=5}
+avg_offsides_top <- round(mean(top_teams$Offsides), digits = 2)
+avg_offsides_middle <- round(mean(middle_teams$Offsides), digits = 2)
+avg_offsides_bottom <- round(mean(bottom_teams$Offsides), digits = 2)
+
+avg_offsides <- data.frame(
+  Team_Level = c("Top Teams", "Middle Teams", "Bottom Teams"),
+  Avg_Offsides = c(avg_offsides_top, avg_offsides_middle, avg_offsides_bottom)
+)
+
+ggplot(avg_offsides, aes(x = Team_Level, y = Avg_Offsides, fill = Team_Level)) +
+  geom_bar(stat = "identity", width = 0.5, color = "black") +
+  geom_text(aes(label = Avg_Offsides), vjust = -0.5, color = "black", size = 4) +
+  labs(title = "Average Offsides by Team Level",
+       x = "Team Level",
+       y = "Average Offsides",
+       fill = "Team Level") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c("Top Teams" = "skyblue", "Middle Teams" = "lightgreen", "Bottom Teams" = "salmon"))
+```
+
+
+
+
+
+```{r, fig.width=10, fig.height=10}
+corr_mat <- round(cor(data[, -c(1,3,22)]),2)
+p_mat <- cor_pmat(data[, -c(1,3,22)])
+ 
+# plotting the interactive corr heatmap
+corr_mat <- ggcorrplot(
+  corr_mat, hc.order = TRUE, type = "lower",
+  outline.col = "white",
+  p.mat = p_mat
+)
+ 
+ggplotly(corr_mat)
+
+```
+
+## [3. Principal Components Analysis]()
+
+```{r}
+data.pca <- PCA(data[, -c(1,3,22)], graph=F)
+data.pca
+eig.val <- get_eigenvalue(data.pca)
+eig.val
+
+```
+
+* The proportion of variance is represented by an eigenvalue in the second column, For example, Dim.1 has an eigenvalue of 15.393, which corresponds to a variance percentage of 66.92852  
+* We can limit the number of principal components to a certain fraction of the total variance (eg > 70%).
+
+```{r, fig.width=12, fig.height=5}
+fviz_eig(data.pca, addlabels = TRUE, ylim = c(0, 100)) +
+  geom_vline(xintercept = 3, linetype = "dashed", color = "salmon", size = 1)
+```
+
+```{r}
+fviz_pca_ind(data.pca,
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = data$Team.Level, # color by groups
+             palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             legend.title = "Groups"
+             )
+```
+
+```{r}
+data.pca
+explained_variance <- data.pca$eig[, 2] 
+pca_3d <- as.data.frame(data.pca$ind$coord)
+pca_3d$Team.Level <- data$Team.Level
+
+plot_ly(pca_3d, x = ~Dim.1, y = ~Dim.2, z = ~Dim.3, color = ~Team.Level, colors = c("#00AFBB", "#E7B800", "#FC4E07")) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = paste0('Dim1 (', round(explained_variance[1], 2), '%)')),
+                      yaxis = list(title = paste0('Dim2 (', round(explained_variance[2], 2), '%)')),
+                      zaxis = list(title = paste0('Dim3 (', round(explained_variance[3], 2), '%)'))),
+         title = "3D PCA Plot of La Liga Teams")
+```
+
+
+```{r, fig.width=14, fig.height=8}
+loadings <- as.data.frame(data.pca$var$coord)
+loadings$Variable <- rownames(loadings)
+loadings
+
+p1 <- ggplot(loadings, aes(x = reorder(Variable, Dim.1), y = Dim.1)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Loadings on PC1", x = "Variables", y = "Loadings") +
+  theme_minimal()
+
+p2 <- ggplot(loadings, aes(x = reorder(Variable, Dim.2), y = Dim.2)) +
+  geom_bar(stat = "identity", fill = "salmon") +
+  coord_flip() +
+  labs(title = "Loadings on PC2", x = "Variables", y = "Loadings") +
+  theme_minimal()
+
+grid.arrange(p1, p2, nrow = 2)
+```
+```{r, fig.width=12, fig.height=5}
+contrib_PC1 <- as.data.frame(data.pca$var$contrib[,1])
+colnames(contrib_PC1) <- c("Contribution")
+contrib_PC1$Variable <- rownames(contrib_PC1)
+
+contrib_PC2 <- as.data.frame(data.pca$var$contrib[,2])
+colnames(contrib_PC2) <- c("Contribution")
+contrib_PC2$Variable <- rownames(contrib_PC2)
+
+p1 = ggplot(contrib_PC1, aes(x = reorder(Variable, Contribution), y = Contribution)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Contribution of Variables to Dim 1", x = "", y = "Contribution (%)") +
+  theme_minimal()
+
+p2 = ggplot(contrib_PC2, aes(x = reorder(Variable, Contribution), y = Contribution)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Contribution of Variables to Dim 2", x = "", y = "Contribution (%)") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+
+
+ 
+```{r}
+PC1 <- data.pca$ind$coord[, 1]
+PC2 <- data.pca$ind$coord[, 2]
+```
+```{r,  fig.width=10, fig.height=5} 
+pca_scores <- as.data.frame(data.pca$ind$coord)
+pca_scores$Team <- data$Team  
+plot_list <- list()
+p1 <- ggplot(pca_scores, aes(x = Team, y = Dim.1)) +
+        geom_bar(stat = "identity", fill = "skyblue") +
+        labs(title = "Scores on PC1 for Each Team", x = "Team", y = "Score on PC1") +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+p2 <- ggplot(pca_scores, aes(x = Team, y = Dim.2)) +
+        geom_bar(stat = "identity", fill = "salmon") +
+        labs(title = "Scores on PC2 for Each Team", x = "Team", y = "Score on PC2") +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+grid.arrange(p1, p2, ncol = 2)
+
+```
+
+- Analyzing the scores on the first principal component (PC1) of the La Liga teams helps us understand the main distinctions between the teams based on the input variables used in the PCA.  
+  * **Teams with high scores on PC1**: Athletic, Atletico Madrid, Barcelona, Real Marid: These teams may have very different characteristics and performance that stand out from the other teams in the original data. They may have better records,more assistances ,more wins,more successful passes and make more dynamic attacking transitions.  
+  * **Teams with low scores on PC1**: 
+  Espanyol, Getafe, Granada, Levante, Sporting Gijon: These teams have significantly negative scores on PC1. This suggests that they may have the opposite characteristics to high scoring teams. They may have poorer performance, poorer records, or lower performance metrics and tend to commit more fouls.  
+  * **Teams with negative scores but not too low on PC1**: They may have below average performance, they may struggle in competition, but they are not the worst teams.  
+- While PC1 explains the overall performance of teams, PC2 focuses on variables that reflect the team's defensive performance, including the number of matches without conceding a goal, the number of goals conceded, the ratio of goals conceded to total goals conceded, the number of red cards, and the number of offsides.  
+  * **Teams with high scores on PC2**: Rayo Vallecano, Real Madrid, Granada,..: Teams with high PC2 scores typically exhibit strong defensive records, characterized by numerous clean sheets and a tendency to concede relatively few goals. Their disciplined approach is evident in the lower incidence of red cards, reflecting a commitment to maintaining defensive stability. Moreover, these teams often adopt a tactically aggressive style of play, resulting in a higher number of offsides for the opposition. This proactive defensive approach helps in disrupting opponent attacks and controlling the flow of the game.
+  * **Teams with low scores on PC2**: Teams with low PC2 scores typically demonstrate weaker defensive records, characterized by fewer clean sheets and a tendency to concede more goals. Their poor discipline is evident in higher red card counts, indicating a lack of control and organization on the defensive end. Additionally, these teams often employ less aggressive tactics, leading to fewer offsides for the opposition. This defensive approach may lack proactive measures to disrupt opponent attacks effectively, resulting in a higher vulnerability to conceding goals.
+  
+  * **Specific to Atlético Madrid:** Reason for Low PC2 Score: Despite many clean sheets, other factors such as a higher number of fouls and red cards negatively impact their PC2 score. Their aggressive defensive style might result in fewer offsides, contributing to a lower score.
+
+
+## [3. Discussion]()  
+- In this analysis, we have explored the Olympic dataset and performed a Principal Components Analysis (PCA) to identify the underlying structure of the data. We found that the first three principal components explain 80.3% of the total variance, which is a good starting point for further analysis. We visualized the data in a 3D plot and identified the main variables that contribute to each principal component. We also visualized the scores of each nation on the first two principal components. This analysis provides valuable insights into the performance of different nations in the Olympic games and can help identify patterns and trends in the data. 
+- The results showed that the best teams were characterized and differentiated from the bottom teams by completing more successful passes and making more dynamic attacking transitions. The bottom teams were characterized by making more defensive than attacking moves, scoring fewer goals and spending more time in the final third of the pitch.
+
+
+
+
+
+
+
+
+
